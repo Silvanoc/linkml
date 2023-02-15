@@ -1,0 +1,19 @@
+default:
+  image: cr.siemens.com/code-ops/poetry-docker:1.2-py3.10@sha256:5abc7171ce9be0c6d3cf17db53f68b072b2dcfeba1dfcecd0c4bffa6399b769d
+
+variables:
+  https_proxy: $CODE_PROXY
+  http_proxy: $CODE_PROXY
+  no_proxy: code.siemens.com,code.siemens.io
+
+stages:
+  - publish
+
+publish:
+  stage: publish
+  script:
+    - poetry config repositories.csc $CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/pypi
+    - poetry self add "poetry-dynamic-versioning[plugin]"
+    - poetry build
+    - poetry publish --repository csc -u gitlab-ci-token -p $CI_JOB_TOKEN
+
