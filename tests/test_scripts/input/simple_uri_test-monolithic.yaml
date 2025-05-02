@@ -1,0 +1,39 @@
+id: https://raw.githubusercontent.com/linkml/linkml/main/tests/test_scripts/input/simple_uri_test_monolithic
+name: simple_uri_test_monolithic
+
+description: A test of various forms of jsonld context generation
+
+imports:
+  - linkml:extensions
+
+prefixes:
+  linkml: https://w3id.org/linkml/
+  foo: http://samples.r.us/foo#
+  bar: http://samples.r.us/bar_
+  slotpfx: http://samples.r.us/slot/
+
+
+classes:
+  model:
+    class_uri: foo:model
+    attributes:
+      id:
+        identifier: true
+    slots:
+      - state
+      - creation
+    exact_mappings:
+      - bar:whaoo
+
+slots:
+  state:
+    slot_uri: foo:state
+    range: simple string
+
+  creation:
+    slot_uri: slotpfx:date
+
+types:
+  simple string:
+    uri: xsd:string
+    base: str
