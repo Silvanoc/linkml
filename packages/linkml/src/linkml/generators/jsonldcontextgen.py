@@ -50,6 +50,7 @@ class ContextGenerator(Generator):
     emit_prefixes: set[str] = field(default_factory=lambda: set())
     default_ns: str = None
     context_body: dict = field(default_factory=lambda: dict())
+    _context_slot_names: dict[str, tuple[str, bool]] = field(default_factory=dict, init=False, repr=False)
     slot_class_maps: dict = field(default_factory=lambda: dict())
     metadata: bool = False
     model: bool | None = True
@@ -429,17 +430,31 @@ class ContextGenerator(Generator):
                         slot_def["@container"] = "@set"
 
                 self._build_element_id(slot_def, slot.slot_uri)
+                if self.is_rdf_type_slot(slot):
+                    # RDF type is represented by the JSON-LD keyword alias,
+                    # not by an ordinary mapping to the rdf:type IRI. Its
+                    # values are IRIs by keyword semantics, so discard any
+                    # range coercion (for example xsd:anyURI).
+                    slot_def.pop("@type", None)
+                    slot_def["@id"] = "@type"
                 self.add_mappings(slot)
         if slot_def:
-            if slot.identifier:
-                # Identifier slots map to the JSON-LD @id keyword. The context key
-                # must be the slot *name* (the term used in instance data), not a
-                # CURIE — even when --use-curies is enabled.
-                key = underscore(aliased_slot_name)
-            elif self.use_curies:
-                key = self._curie(slot)
-            else:
-                key = underscore(aliased_slot_name)
+            # Identifier slots keep their @id key precedence. RDF type is the
+            # one non-identifier predicate whose serialized term remains the
+            # aliased instance key even when CURIE output is requested.
+            alias_key = underscore(aliased_slot_name)
+            key = self.serialized_slot_name(
+                slot,
+                use_curies=self.use_curies,
+                curie_name=lambda: self._curie(slot),
+                alias_name=alias_key,
+                identifier_name=alias_key,
+            )
+            is_rdf_type = not slot.identifier and self.is_rdf_type_slot(slot)
+            previous_slot = self._context_slot_names.get(key)
+            if previous_slot is not None and previous_slot[0] != slot.name and (is_rdf_type or previous_slot[1]):
+                raise ValueError(f"Serialized context key collision for slot {slot.name!r}: {key!r}")
+            self._context_slot_names[key] = (slot.name, is_rdf_type)
             self.context_body[key] = slot_def
 
             # collect @embed only for object-valued slots (range is a class)
@@ -479,6 +494,10 @@ class ContextGenerator(Generator):
         def _add_if_type_differs(slot_name: str, override_range: str) -> None:
             """Add a scoped entry if the override's @type differs from the global slot's @type."""
             global_slot = self.schema.slots[slot_name]
+            if self.is_rdf_type_slot(global_slot):
+                # The @type keyword always denotes an IRI; a slot range override
+                # must not turn it into a typed literal.
+                return
             global_type = self._resolve_slot_type(global_slot.range) if global_slot.range else None
             override_type = self._resolve_slot_type(override_range)
             if override_type == global_type:
@@ -487,10 +506,15 @@ class ContextGenerator(Generator):
             self._build_element_id(entry, global_slot.slot_uri)
             if override_type is not None:
                 entry["@type"] = override_type
-            if self.use_curies and not global_slot.identifier:
-                scoped[self._curie(global_slot)] = entry
-            else:
-                scoped[underscore(slot_name)] = entry
+            alias_key = underscore(self.aliased_slot_name(global_slot))
+            key = self.serialized_slot_name(
+                global_slot,
+                use_curies=self.use_curies,
+                curie_name=lambda: self._curie(global_slot),
+                alias_name=alias_key,
+                identifier_name=alias_key,
+            )
+            scoped[key] = entry
 
         # Check attributes that shadow global slots
         for attr_name, attr in cls.attributes.items():
